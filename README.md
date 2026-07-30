@@ -278,3 +278,52 @@ pipeline {
     }
 } 
 ```
+
+You can reference a shared library directly inside your Jenkinsfile without configuring it globally in the Jenkins UI. This is called a Dynamic Retrieval or Inline Library Definition.This method is highly useful for testing library changes on a feature branch or keeping your pipeline definitions completely standalone.
+
+Remove the Global library definition "my-shared-library" from Jenkins UI and modify the Jenkinsfile as below
+
+```groovy
+library identifier: 'my-shared-library@main', retriever: modernSCM([
+    $class: 'GitSCMSource',
+    remote: 'https://github.com/mustafa-saleh/demo-module-8-jenkins-shared-library.git',
+    credentialsId: 'github-repo'
+])
+
+def gv
+
+pipeline {   
+    agent any
+
+    tools {
+        maven 'maven-3.9.16'
+    }
+
+    stages {
+
+        stage("build jar") {
+            steps {
+                script {
+                    buildJar()
+                }
+            }
+        }
+
+        stage("build & push image") {
+            when {
+                expression { 
+                    BRANCH_NAME == 'main'
+                }
+            }
+
+            steps {
+                script {
+                    buildImage 'mustafa199b/demo:jma-3.0'
+                    dockerLogin()
+                    dockerPush 'mustafa199b/demo:jma-3.0'
+                }
+            }
+        }       
+    }
+} 
+```
