@@ -77,9 +77,9 @@ def buildJar() {
 def buildImage() {
     echo "building the docker image..."
     withCredentials([usernamePassword(credentialsId: 'docker-hub', passwordVariable: 'PASS', usernameVariable: 'USER')]) {
-        sh 'docker build -t mustafa199b/demo:jma-2.0 .'
+        sh 'docker build -t mustafa199b/demo:jma-3.0 .'
         sh 'echo $PASS | docker login -u $USER --password-stdin'
-        sh 'docker push mustafa199b/demo:jma-2.0'
+        sh 'docker push mustafa199b/demo:jma-3.0'
     }
 }
 
@@ -105,9 +105,9 @@ create a new file "vars/buildImage.groovy" with the following
 def call() {
     echo "building the docker image..."
     withCredentials([usernamePassword(credentialsId: 'docker-hub-repo', passwordVariable: 'PASS', usernameVariable: 'USER')]) {
-        sh 'docker build -t nanatwn/demo-app:jma-2.0 .'
+        sh 'docker build -t mustafa199b/demo:jma-3.0 .'
         sh 'echo $PASS | docker login -u $USER --password-stdin'
-        sh 'docker push nanatwn/demo-app:jma-2.0'
+        sh 'docker push mustafa199b/demo:jma-3.0'
     }
 }
 ```
@@ -168,4 +168,113 @@ pipeline {
 
 Note that the "script.groovy" have been removed & now the functions are referenced from the shared library.
 
+We can further breakdown the logic to a smaller steps to prevent duplications and allow the code to be reused. The "buildImage" function takes care of creating the docker image, signin to the repository & pushing the created image. We can split this logic to 3 functions "buildDockerImage", "dockerLogin", "dockerPush". 
 
+Create a new package in src folder "com.example" that contains the "Docker.groovy" class below:
+
+```groovy
+#!/user/bin/env groovy
+package com.example
+
+class Docker implements Serializable {
+
+    def script
+
+    Docker(script) {
+        // pass execution context as a script from the caller to allow access to jenkins modules
+        this.script = script
+    }
+
+    def buildDockerImage(String imageName) {
+        script.echo "building the docker image..."
+        script.sh "docker build -t $imageName ."
+        }
+
+    def dockerLogin() {
+        script.withCredentials([script.usernamePassword(credentialsId: 'docker-hub', passwordVariable: 'PASS', usernameVariable: 'USER')]) {
+            script.sh "echo '${script.PASS}' | docker login -u '${script.USER}' --password-stdin"
+        }
+    }
+
+    def dockerPush(String imageName) {
+        script.sh "docker push $imageName"
+    }
+}
+```
+
+Now let's update the "buildImage" function with the following:
+
+```groovy
+#!/user/bin/env groovy
+
+import com.example.Docker
+
+def call(String imageName) {
+    return new Docker(this).buildDockerImage(imageName)
+}
+```
+
+Create new file "dockerLogin.groovy"
+
+```groovy
+#!/user/bin/env groovy
+
+import com.example.Docker
+
+def call() {
+    return new Docker(this).dockerLogin()
+}
+```
+
+Create new file "dockerPush.groovy"
+
+```groovy
+#!/user/bin/env groovy
+
+import com.example.Docker
+
+def call(String imageName) {
+    return new Docker(this).dockerPush(imageName)
+}
+```
+
+Update the Jenkins file to call the new functions and pass the "imageName" as a parameter
+
+```groovy
+@Library('my-shared-library') _     // _ is required since there're no statements between the "@Library" & "pipeline" declarations
+
+pipeline {   
+    agent any
+
+    tools {
+        maven 'maven-3.9.16'
+    }
+
+    stages {
+
+        stage("build jar") {
+            steps {
+                script {
+                    buildJar()
+                }
+            }
+        }
+
+        stage("build & push image") {
+            when {
+                expression { 
+                    BRANCH_NAME == 'main'
+                }
+            }
+
+            steps {
+                script {
+                    buildImage 'mustafa199b/demo:jma-3.0'
+                    dockerLogin()
+                    dockerPush 'mustafa199b/demo:jma-3.0'
+                }
+            }
+        }       
+    }
+} 
+```
